@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>D3 JS</title>
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- <script src="https://d3js.org/d3.v5.min.js"></script> -->
+    <style>
+        .mainContainer {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            border: 1px solid red;
+        }
+
+        .node {
+            fill: #ccc;
+            stroke: black;
+            stroke-width: 2px;
+
+        }
+
+        .link {
+            stroke: #777;
+            stroke-width: 2px;
+        }
+
+        .text {
+            font-weight: normal;
+            font-size: 20px;
+            font-family: sans-serif;
+            fill: grey;
+            stroke-width: 0px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- <div class="mainContainer">
+        <div class="container" id="svg-container">
+
+        </div>
+    </div> -->
+    <script src="lib/d3.min.js"></script>
+    <script src="lib/jquery.min.js"></script>
+    <script src="lib/neo4j-web.min.js"></script>
+    <script src="https://d3js.org/d3-selection-multi.v1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.15/lodash.core.min.js"></script>
+    <script>
+        function checkExist(data, newData) {
+            return data.findIndex(value => value.title === newData.title)
+        }
+
+        var neo4j = window.neo4j.v1;
+        var driver = neo4j.driver("bolt://localhost", neo4j.auth.basic("neo4j", "Nevermore123"));
+        function getGraph() {
+            var session = driver.session();
+            return session.run(
+                'match (n: Negara {name: "Indonesia"})-[]-(m: Provinsi) return m.name as provinsi, collect(n.name) as negara')
+                //             'MATCH (m:Movie)<-[:ACTED_IN]-(a:Person {name: "Tom Hanks"}) \
+                // RETURN m.title AS movie, collect(a.name) AS cast \
+                // LIMIT {limit}', { limit: 5 })
+                .then(results => {
+                    session.close();
+                    var nodes = [], rels = [], i = 0;
+                    results.records.forEach(res => {
+                        // movie = 15 film dan cast jadi 15 juga
+                        nodes.push({ title: res.get('provinsi'), label: 'provinsi' });
+                        var target = i;
+                        i++;
+                        res.get('negara').forEach(name => {
+                            var province = { title: name, label: 'provinsi' };
+                            var source = checkExist(nodes, province);
+                            if (source == -1) {
+                                nodes.push(province);
+                                source = i;
+                                i++;
+                            }
+                            rels.push({ source, target })
+                        })
+                    });
+                    return { nodes, links: rels };
+                });
+        }
+
+        var width = 1200,
+            height = 500;
+
+        var svg = d3.select('body').append('svg')
+            .attr('width', width)
+            .attr('height', height);
+
+        svg.append('defs')
+            .append('marker')
+            .attrs({
+                'id': 'arrowhead',
+                'viewBox': '-0 -5 10 10',
+                'refX': 20,
+                'refY': 0,
+                'orient': 'auto',
+                'markerWidth': 8,
+                'markerHeight': 8,
+                'xoverflow': 'visible'
+            })
+            .append('svg:path')
+            .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+            .attr('fill', '#999')
+            .style('stroke', 'none');
+
+        //create force layout
+        var force = d3.layout.force()
+            .charge(-100)
+            .linkDistance(250)
+            .size([width, height]);
+
+        getGraph()
+            .then(graph => {
+                force.nodes(graph.nodes).links(graph.links).start();
+
+                var link = svg.selectAll(".link")
+                    .data(graph.links).enter()
+                    .append("line").attr("class", "link")
+                    .attr('marker-end', 'url(#arrowhead)')
+
+                const edgepaths = svg.selectAll(".edgepath")
+                    .data(graph.links)
+                    .enter()
+                    .append('path')
+                    .attrs({
+                        'class': 'edgepath',
+                        'fill-opacity': 0,
+                        'stroke-opacity': 0,
+                        'id': function (d, i) { return 'edgepath' + i }
+                    })
+                    .style("pointer-events", "none");
+
+                const edgelabels = svg.selectAll(".edgelabel")
+                    .data(graph.links)
+                    .enter()
+                    .append('text')
+                    .style("pointer-events", "none")
+                    .attrs({
+                        'class': 'edgelabel',
+                        'id': function (d, i) { return 'edgelabel' + i },
+                        'font-size': 12,
+                        'font-family': 'sans-serif',
+                        'fill': 'red',
+                    });
+
+                edgelabels.append('textPath')
+                    .attr('xlink:href', function (d, i) { return '#edgepath' + i })
+                    .style("text-anchor", "middle")
+                    .style("pointer-events", "none")
+                    .attr("startOffset", "50%")
+                    .text('HAVE_PROVINCE');
+
+
+                var node = svg.selectAll(".node")
+                    .data(graph.nodes)
+                    .enter().append("g")
+                    .attr("class", "node")
+                    .call(force.drag);
+
+                // node.append("circle")
+                //     .attr("r", 20)
+                //     .call(force.drag);
+
+                node.append("circle")
+                    .attr("r", 15)
+                    .attr('class', 'node')
+
+                node.append("text")
+                    .attr("dx", 20)
+                    .attr("dy", ".35em")
+                    .attr('class', 'text')
+                    .text(function (d) { return d.title });
+
+                // normal node without text
+                // -----------------------
+
+                // var node = svg.selectAll(".node")
+                //     .data(graph.nodes).enter()
+                //     .append("circle")
+                //     .attr("class", 'node')
+                //     .attr("r", 20)
+                //     .call(force.drag);
+
+                // html title attribute
+                // node.append("title")
+                //     .text(d => {
+                //         return d.title;
+                //     });
+
+                // force feed algo ticks and create link and position
+                force.on("tick", () => {
+                    link.attr("x1", d => {
+                        return d.source.x;
+                    }).attr("y1", d => {
+                        return d.source.y;
+                    }).attr("x2", d => {
+                        return d.target.x;
+                    }).attr("y2", d => {
+                        return d.target.y;
+                    });
+
+                    node.attr("transform", function (d) { return "translate(" + d.x + "," + d.y + ")"; });
+
+                    edgepaths.attr('d', function (d) {
+                        return 'M ' + d.source.x + ' ' + d.source.y + ' L ' + d.target.x + ' ' + d.target.y;
+                    });
+
+                    edgelabels.attr('transform', function (d) {
+                        if (d.target.x < d.source.x) {
+                            let bbox = this.getBBox();
+
+                            let rx = bbox.x + bbox.width / 2;
+                            let ry = bbox.y + bbox.height / 2;
+                            return 'rotate(180 ' + rx + ' ' + ry + ')';
+                        }
+                        else {
+                            return 'rotate(0)';
+                        }
+                    });
+                });
+            });
+    </script>
+</body>
+
+</html>
